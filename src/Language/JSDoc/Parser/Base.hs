@@ -1,8 +1,8 @@
 module Language.JSDoc.Parser.Base where
 
-import Text.ParserCombinators.Parsec
-import Control.Applicative hiding ((<|>), optional, many)
-import Debug.Trace
+import           Control.Applicative           hiding (many, optional, (<|>))
+import           Debug.Trace
+import           Text.ParserCombinators.Parsec
 
 ws :: Parser String
 ws = many (oneOf " ")
@@ -20,7 +20,7 @@ syntacticSugar :: String -> Parser (Maybe String)
 syntacticSugar s = (string s *> (pure . Just $ s)) <|> pure Nothing
 
 eol :: Parser String
-eol = (try $ string "\n") <|> (try $ string "\r\n") <|> string "\r"
+eol = try (string "\n") <|> try (string "\r\n") <|> string "\r"
 
 emptyLine :: Parser String
 emptyLine = ws *> eol

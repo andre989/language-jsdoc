@@ -1,42 +1,74 @@
 module Language.JSDoc.Parser.Parser where
 
-import Text.ParserCombinators.Parsec
-import Control.Applicative hiding ((<|>), optional, many)
-import Language.JSDoc.Parser.Base
+import           Control.Applicative           hiding (many, optional, (<|>))
+import           Language.JSDoc.Parser.Base
+import           Text.ParserCombinators.Parsec
 
-type Name = [Char]
-type TypeName = [Char]
-type Param = (Name, TypeName)
+input = unlines
+    [   "/**"
+    ,   " * Substitute %n parameters in a string"
+    ,   " * @param {String} string The source string to substitue %n occurences in"
+    ,   " * @param {Array|String} params The parameters to use for the substitution. Index 0 will replace %1, index 1, %2"
+    ,   " * and so on. If a string is passed, only %1 will be replaced"
+    ,   " * @return {String} The final string, with %n occurences replaced with their equivalent"
+    ,   " */"
+    ]
+data JSDocAst =
+    JSDocAst
+        {   jsdocDescription :: String
+        ,   tags             :: [Tag]
+        } deriving Show
 
-data JSDocSignature =
-    JSDocSignature
-          {   paramsType :: [Param]
-          ,   returnType :: [Char]
-          ,   private :: Bool
-          ,   description :: Maybe [Char]
-          } deriving Show
+data Tag =
+    ParamTag TypeAnnotation String String |
+    ReturnTag TypeAnnotation |
+    PrivateTag deriving Show
 
-startJSDoc :: Parser [Char]
+data TypeAnnotation =
+    NameExpression String |
+    ParametricType String [TypeAnnotation] |
+    NonNullableType TypeAnnotation deriving Show
+
+startJSDoc :: Parser String
 startJSDoc = lexeme (string "/**")
 
-endJSDoc :: Parser [Char]
+endJSDoc :: Parser String
 endJSDoc = lexeme (string "*/")
 
-jsdoc :: Parser JSDocSignature
+jsdoc :: Parser JSDocAst
 jsdoc = between (startJSDoc <* eol) endJSDoc parseBody
 
-parseBody :: Parser JSDocSignature
-parseBody = do
-    manyTill commentString (try $ lookAhead param)
-    params <- manyTill param (startReturnLine <|> privateLine <|> endOfJSDoc)
-    returnTy <- option "void" (try returnT)
-    private <- option False (try $ parsePrivate)
-    manyTill anyChar endOfJSDoc
-    return $ JSDocSignature params returnTy private Nothing
-    where
-        startReturnLine = try $ lookAhead (lexeme $ string "* @r")
-        endOfJSDoc = try $ lookAhead $ lexeme $ string "*/"
-        privateLine = try $ lookAhead (string " * @private")
+parseBody :: Parser JSDocAst
+parseBody = JSDocAst <$> paramDescription <*> many parseTag
+
+parseTag :: Parser Tag
+parseTag = initTagLine *>
+    seeNext 10 *>
+    try (lookAhead parseParamTag) <|>
+    try (lookAhead parseReturnTag) <|>
+    try (lookAhead parsePrivateTag) <?>
+    "Error"
+
+initTagLine :: Parser String
+initTagLine = initCommentLine *> string "@"
+
+parseParamTag :: Parser Tag
+parseParamTag =
+    pure ParamTag
+    <*  string "param"
+    <*>  between (lexeme $ string "{") (lexeme $ string "}") parseTypeAnnotation
+    <*> variableName
+    <*> paramDescription
+
+parseReturnTag :: Parser Tag
+parseReturnTag = pure ReturnTag <* string "return" <*> parseTypeAnnotation
+
+parsePrivateTag :: Parser Tag
+parsePrivateTag = pure PrivateTag <* string "private"
+
+parseTypeAnnotation :: Parser TypeAnnotation
+parseTypeAnnotation =
+    NameExpression <$> many (noneOf ['}'])
 
 initCommentLine :: Parser Char
 initCommentLine = lexeme $ char '*'
@@ -44,39 +76,21 @@ initCommentLine = lexeme $ char '*'
 commentString :: Parser String
 commentString =  initCommentLine *> many (noneOf ['\r', '\n']) <* eol
 
-param :: Parser Param
-param = (pure genParam) <* initCommentLine <* lexeme (string "@param") <*> typeName <*> variableName <* paramDescription
-
-typeName :: Parser [Char]
-typeName =  char '{' *> many (noneOf ['}']) <* char '}'
 
 variableName :: Parser String
 variableName = lexeme (many (noneOf [' ', ':', '\n']))
 
 paramDescription :: Parser String
-paramDescription = combineDescription <$> lexeme (many (noneOf ['\n'])) <* string "\n" <*> manyTill commentString (startNextParam <|> startReturnLine <|> endOfJSDoc)
+paramDescription = combineDescription
+    <$> lexeme (many (noneOf ['\n']))
+    <* string "\n"
+    <*> manyTill commentString (try $ lookAhead initTagLine <|> endOfJSDoc)
     where
-          startNextParam = try $ lookAhead (lexeme $ string "* @p")
-          startReturnLine = try $ lookAhead (lexeme $ string "* @r")
-          endOfJSDoc = try $ lookAhead (lexeme $ string "*/")
+        endOfJSDoc = try $ lookAhead (lexeme $ string "*/")
 
 combineDescription :: String -> [String] -> String
-combineDescription s descs = s ++ (foldl (++) "" descs)
+combineDescription s descs = s ++ concat descs
 
-genParam :: String -> String -> Param
-genParam typeName varName = (varName, typeName)
 
-returnT :: Parser [Char]
-returnT = do
-     many $ noneOf ['@']
-     lexeme (syntacticSugar "@return")
-     typeN <- typeName
-     descr <- lexeme (many (noneOf ['\n']))
-     string "\n"
-     return typeN
-
-startJsDoc :: Parser [Char]
+startJsDoc :: Parser String
 startJsDoc = lexeme (syntacticSugar "/**") *> string "\n"
-
-parsePrivate :: Parser Bool
-parsePrivate = string " * @private\n" >> return True

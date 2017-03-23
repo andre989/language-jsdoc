@@ -1,6 +1,6 @@
-import Test.Hspec
-import Language.JSDoc.Parser
-import Language.JSDoc.Parser.Parser
+import           Language.JSDoc.Parser
+import           Language.JSDoc.Parser.Parser
+import           Test.Hspec
 
 input = unlines
     [   "/**"
@@ -18,4 +18,4 @@ main = hspec $ do
     context "when given a public jsdoc declaration" $ do
         it "returns false for private AST property" $ do
             let (Right ast) = parse input
-            private ast `shouldBe` True
+            jsdocDescription ast `shouldBe` ""
